@@ -3,6 +3,11 @@
 
 A modern UI replacement addon for Final Fantasy XI (Ashita v4). XIUI replaces the default HUD elements with clean, customizable alternatives — all configurable in-game via `/xiui`.
 
+# Announcing our latest version: XIUI+ (currently in Alpha testing)
+Rewritten from the ground up in C++ and can be found at our new repository: https://github.com/Team-XIUI/xiuiplus-releases
+
+The current version here will be receiving a few more updates before being archived as we move our focus exclusively onto XIUI+.
+
 ## Features
 
 - **Player Bar** — HP, MP, TP with job and level display
