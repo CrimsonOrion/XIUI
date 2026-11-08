@@ -106,12 +106,6 @@ local imtext = require('libs.imtext');
 local components = require('config.components');
 local satchelTooltipFonts = require('modules.satchel.tooltips');
 
--- Flag to skip settings_update callback during internal saves
-local bInternalSave = false;
--- For Ashita 4.3+, callbacks are async so we need to defer clearing the flag
-local bIsAshita43 = (ImGuiChildFlags_Borders ~= nil);
-local bPendingInternalSaveClear = false;
-
 
 
 -- Local split function for hot reload (avoids monkeypatching string metatable)
@@ -704,9 +698,7 @@ function ChangeProfile(name)
     profileManager.SaveProfileSettings(config.currentProfile, gConfig);
 
     config.currentProfile = name;
-    bInternalSave = true;
     settings.save(); -- Save character preference
-    if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
 
     -- Clear textures to prevent ghosting
     TextureManager.clear();
@@ -787,9 +779,7 @@ end
 uiRecovery.Configure({
     save = function()
         profileManager.SaveProfileSettings(config.currentProfile, gConfig);
-        bInternalSave = true;
         settings.save();
-        if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
     end,
 });
 
@@ -875,9 +865,7 @@ local function SaveCharacterSettingsIfChanged()
     if charSettingsSaved and charSettingsSaved.owner == config and SameData(charSettingsSaved.copy, config) then
         return;
     end
-    bInternalSave = true;
     settings.save();
-    if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
     charSettingsSaved = { owner = config, copy = CopyPlain(config) };
 end
 
@@ -925,9 +913,7 @@ end
 -- Save character settings without triggering settings_update callback
 -- Used by modules that need to persist to disk but don't want reload side-effects
 function SaveCharacterSettingsInternal()
-    bInternalSave = true;
     settings.save();
-    if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
     SeedCharacterSettingsSnapshot();
 end
 
@@ -964,9 +950,7 @@ function RenameProfile(oldName, newName)
 
     if (config.currentProfile == oldName) then
         config.currentProfile = newName;
-        bInternalSave = true;
         settings.save();
-        if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
     end
 
     return true;
@@ -1070,9 +1054,7 @@ function DeferredUpdateVisuals()
 end
 
 settings.register('settings', 'settings_update', function (s)
-    -- Skip if this is an internal save (we already handle updates appropriately)
-    -- This callback is for external changes only (e.g., manual config file edits)
-    if bInternalSave then return; end
+    -- Fired by the settings lib on load/reload/reset and character login/logout (never by settings.save).
     if (s ~= nil) then
         config = s;
         SeedCharacterSettingsSnapshot();  -- this is what the file now holds
@@ -1178,12 +1160,6 @@ ashita.events.register('d3d_present', 'present_cb', function ()
         -- Must run AFTER FlushPendingReleases (so prior evictions are safe) and
         -- BEFORE any rendering this frame (so stale caches don't produce wrong icons).
         macropalette.FlushPendingFrameWork();
-
-        -- Clear internal save flag (deferred for Ashita 4.3+ async callbacks)
-        if bPendingInternalSaveClear then
-            bInternalSave = false;
-            bPendingInternalSaveClear = false;
-        end
 
         -- Process pending profile change outside the render loop
         if pendingProfileChange then
