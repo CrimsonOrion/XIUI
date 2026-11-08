@@ -24,7 +24,7 @@
 
 addon.name      = 'XIUI';
 addon.author    = 'Team XIUI';
-addon.version   = '1.8.4';
+addon.version   = '1.8.5';
 addon.desc      = 'Multiple UI elements with manager';
 addon.link      = 'https://github.com/tirem/XIUI'
 
@@ -105,12 +105,6 @@ local TextureManager = require('libs.texturemanager');
 local imtext = require('libs.imtext');
 local components = require('config.components');
 local satchelTooltipFonts = require('modules.satchel.tooltips');
-
--- Flag to skip settings_update callback during internal saves
-local bInternalSave = false;
--- For Ashita 4.3+, callbacks are async so we need to defer clearing the flag
-local bIsAshita43 = (ImGuiChildFlags_Borders ~= nil);
-local bPendingInternalSaveClear = false;
 
 
 
@@ -704,9 +698,7 @@ function ChangeProfile(name)
     profileManager.SaveProfileSettings(config.currentProfile, gConfig);
 
     config.currentProfile = name;
-    bInternalSave = true;
     settings.save(); -- Save character preference
-    if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
 
     -- Clear textures to prevent ghosting
     TextureManager.clear();
@@ -787,9 +779,7 @@ end
 uiRecovery.Configure({
     save = function()
         profileManager.SaveProfileSettings(config.currentProfile, gConfig);
-        bInternalSave = true;
         settings.save();
-        if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
     end,
 });
 
@@ -848,15 +838,66 @@ function UpdateUserSettings()
     settingsUpdater.UpdateUserSettings(gAdjustedSettings, settingsDefaults.default_settings, gConfig);
 end
 
+-- Save the character file only when changed.
+local charSettingsSaved = nil;  -- { owner = config, copy = deep copy }
+local function CopyPlain(v)
+    if type(v) ~= 'table' then return v; end
+    local c = {};
+    for k, x in pairs(v) do c[k] = CopyPlain(x); end
+    return c;
+end
+local function SameData(a, b)
+    if a == b then return true; end
+    if type(a) ~= 'table' or type(b) ~= 'table' then return false; end
+    for k, v in pairs(a) do
+        if not SameData(v, b[k]) then return false; end
+    end
+    for k in pairs(b) do
+        if a[k] == nil then return false; end
+    end
+    return true;
+end
+-- Snapshot config as the file on disk now holds it.
+function SeedCharacterSettingsSnapshot()
+    charSettingsSaved = { owner = config, copy = CopyPlain(config) };
+end
+local function SaveCharacterSettingsIfChanged()
+    if charSettingsSaved and charSettingsSaved.owner == config and SameData(charSettingsSaved.copy, config) then
+        return;
+    end
+    settings.save();
+    charSettingsSaved = { owner = config, copy = CopyPlain(config) };
+end
+
+-- Window positions as last written to the profile file.
+local savedWindowPositions = nil;
+local wasMouseDown = false;
+
+local function SaveProfileFile()
+    profileManager.SaveProfileSettings(config.currentProfile, gConfig);
+    savedWindowPositions = CopyPlain(gConfig.windowPositions);
+end
+
+-- Modules update gConfig.windowPositions in memory while dragging. Write the
+-- profile once when the mouse is released, only if a position actually changed.
+local function FlushWindowPositionsOnRelease()
+    local imgui = require('imgui');
+    local mouseDown = imgui.IsMouseDown(0) or imgui.IsMouseDown(1);
+    local released = wasMouseDown and not mouseDown;
+    wasMouseDown = mouseDown;
+    if not released or SameData(savedWindowPositions, gConfig.windowPositions) then
+        return;
+    end
+    SaveProfileFile();
+end
+
 function SaveSettingsToDisk()
     if gConfig.colorCustomization == nil then
         gConfig.colorCustomization = deep_copy_table(defaultUserSettings.colorCustomization);
     end
     gConfigVersion = gConfigVersion + 1; -- Notify caches of settings change
-    profileManager.SaveProfileSettings(config.currentProfile, gConfig);
-    bInternalSave = true;
-    settings.save();
-    if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
+    SaveProfileFile();
+    SaveCharacterSettingsIfChanged();
 end
 
 function SaveSettingsOnly()
@@ -864,19 +905,16 @@ function SaveSettingsOnly()
         gConfig.colorCustomization = deep_copy_table(defaultUserSettings.colorCustomization);
     end
     gConfigVersion = gConfigVersion + 1; -- Notify caches of settings change
-    profileManager.SaveProfileSettings(config.currentProfile, gConfig);
-    bInternalSave = true;
-    settings.save();
-    if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
+    SaveProfileFile();
+    SaveCharacterSettingsIfChanged();
     UpdateUserSettings();
 end
 
 -- Save character settings without triggering settings_update callback
 -- Used by modules that need to persist to disk but don't want reload side-effects
 function SaveCharacterSettingsInternal()
-    bInternalSave = true;
     settings.save();
-    if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
+    SeedCharacterSettingsSnapshot();
 end
 
 -- New functions for profile management
@@ -912,9 +950,7 @@ function RenameProfile(oldName, newName)
 
     if (config.currentProfile == oldName) then
         config.currentProfile = newName;
-        bInternalSave = true;
         settings.save();
-        if bIsAshita43 then bPendingInternalSaveClear = true; else bInternalSave = false; end
     end
 
     return true;
@@ -1018,11 +1054,10 @@ function DeferredUpdateVisuals()
 end
 
 settings.register('settings', 'settings_update', function (s)
-    -- Skip if this is an internal save (we already handle updates appropriately)
-    -- This callback is for external changes only (e.g., manual config file edits)
-    if bInternalSave then return; end
+    -- Fired by the settings lib on load/reload/reset and character login/logout (never by settings.save).
     if (s ~= nil) then
         config = s;
+        SeedCharacterSettingsSnapshot();  -- this is what the file now holds
 
         -- Validate profile existence
         local currentProfileName = config.currentProfile;
@@ -1104,6 +1139,7 @@ end
 
 ashita.events.register('d3d_present', 'present_cb', function ()
     if not bInitialized then return; end
+    gXiuiFrame = (gXiuiFrame or 0) + 1;  -- per-frame memos key on this
 
     local ok, err = pcall(function()
         -- Deferred satchel tooltip font loads (family/size Selectable). Must run
@@ -1124,12 +1160,6 @@ ashita.events.register('d3d_present', 'present_cb', function ()
         -- Must run AFTER FlushPendingReleases (so prior evictions are safe) and
         -- BEFORE any rendering this frame (so stale caches don't produce wrong icons).
         macropalette.FlushPendingFrameWork();
-
-        -- Clear internal save flag (deferred for Ashita 4.3+ async callbacks)
-        if bPendingInternalSaveClear then
-            bInternalSave = false;
-            bPendingInternalSaveClear = false;
-        end
 
         -- Process pending profile change outside the render loop
         if pendingProfileChange then
@@ -1156,7 +1186,7 @@ ashita.events.register('d3d_present', 'present_cb', function ()
             uiModules.UpdateVisualsAll(gAdjustedSettings);
         end
 
-        local eventSystemActive = gameState.GetEventSystemActive();
+        local eventSystemActive = gameState.GetEventSystemActive() and not gameState.IsGatheringPointTargeted();
         local menuOpen = gameState.IsMenuOpen();
 
         if not gameState.ShouldHideUI(gConfig.hideDuringEvents, bLoggedIn) then
@@ -1208,6 +1238,8 @@ ashita.events.register('d3d_present', 'present_cb', function ()
             uiModules.HideAll();
         end
 
+        FlushWindowPositionsOnRelease();
+
         -- XIUI DEV ONLY
         if _XIUI_DEV_HOT_RELOADING_ENABLED then
             local currentTime = os.time();
@@ -1227,6 +1259,8 @@ ashita.events.register('d3d_present', 'present_cb', function ()
 end);
 
 ashita.events.register('load', 'load_cb', function ()
+    SeedCharacterSettingsSnapshot();  -- config as settings.load() read it
+    savedWindowPositions = CopyPlain(gConfig.windowPositions);
     profileManager.SyncProfilesWithDisk();
     gConfig.appliedPositions = {};
     UpdateUserSettings();
@@ -1369,7 +1403,44 @@ ashita.events.register('command', 'command_cb', function (e)
             return;
         end
 
+        --@cmd /xiui hotbar layout : Cycle layout (Hotbar, Crossbar, Both)
+        --@cmd /xiui hotbar layout [hotbar|crossbar|both] : Set a specific layout
         --@cmd /xiui hotbar <bar> <slot> : Execute hotbar slot (used by keybinds)
+        if (command_args[2] == 'hotbar' and command_args[3] == 'layout') then
+            if not gConfig.hotbarCrossbar then
+                print(chat.header(addon.name):append(chat.error('Hotbar settings are not available.')));
+                return;
+            end
+
+            local modes = { 'hotbar', 'crossbar', 'both' };
+            local labels = { hotbar = 'Hotbar', crossbar = 'Crossbar', both = 'Both' };
+            local requested = command_args[4] and command_args[4]:lower() or nil;
+            local newMode;
+
+            if requested == nil then
+                local current = gConfig.hotbarCrossbar.mode or 'hotbar';
+                local nextIndex = 1;
+                for i, mode in ipairs(modes) do
+                    if mode == current then
+                        nextIndex = (i % #modes) + 1;
+                        break;
+                    end
+                end
+                newMode = modes[nextIndex];
+            elseif labels[requested] then
+                newMode = requested;
+            else
+                print(chat.header(addon.name):append(chat.message('Usage: /xiui hotbar layout [hotbar|crossbar|both]')));
+                return;
+            end
+
+            gConfig.hotbarCrossbar.mode = newMode;
+            SaveSettingsOnly();
+            DeferredUpdateVisuals();
+            print(chat.header(addon.name):append(chat.message('Hotbar layout: ')):append(chat.success(labels[newMode])));
+            return;
+        end
+
         -- Called by Ashita /bind system to execute hotbar actions
         if (command_args[2] == 'hotbar' and #command_args >= 4) then
             local barIndex = tonumber(command_args[3]);
@@ -1851,6 +1922,10 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
     expBar.HandlePacket(e)
     debuffHandler.HandleIncomingPacket(e);
 
+    if e.id == 0x032 or e.id == 0x034 then
+        gameState.HandleEventPacket(e);
+    end
+
     -- Pet bar packet handling (0x0028 Action, 0x0068 Pet Sync)
     if gConfig.showPetBar then
         petBar.HandlePacket(e);
@@ -1876,6 +1951,7 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
             if skillchainTrackingEnabled() then
                 skillchainModule.HandleActionPacket(actionPacket);
             end
+            hotbar.HandleActionPacket(actionPacket);
         end
     elseif (e.id == 0x063) then
         if gConfig.showPhantomRoll then phantomRoll.HandleBuffPacket(e); end
@@ -1915,6 +1991,9 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
             petBuffHandler.HandleMessagePacket(messagePacket);
             if enemyCastTrackingEnabled() then enemyCasts.HandleMessagePacket(messagePacket); end
             blueMagicLearned.HandleMessagePacket(messagePacket);
+            if gConfig.hotbarEnabled then
+                hotbar.HandleMessagePacket(messagePacket);
+            end
             if gConfig.showNotifications then
                 notifications.HandleMessagePacket(e, messagePacket, 0x0029);
             end
@@ -1933,19 +2012,18 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
         -- Different structure than 0x0029 - use ParseMessageStandardPacket
         local messagePacket = ParseMessageStandardPacket(e.data);
         if messagePacket then
+            if gConfig.hotbarEnabled then
+                hotbar.HandleMessageStandardPacket(messagePacket);
+            end
             if gConfig.showNotifications then
                 notifications.HandleMessagePacket(e, messagePacket, 0x002A);
             end
         end
     elseif (e.id == 0x00B) then
-        -- Save any pending hotbar changes before zone (loading screen masks the delay)
-        if macropalette.IsHotbarDirty() then
+        -- Save pending hotbar and palette changes before zone (one save).
+        if macropalette.IsHotbarDirty() or palette.IsPaletteStateDirty() then
             SaveSettingsToDisk();
             macropalette.ClearHotbarDirty();
-        end
-        -- Save any pending palette selection changes before zone
-        if palette.IsPaletteStateDirty() then
-            SaveSettingsToDisk();
             palette.ClearPaletteStateDirty();
         end
         notifications.HandleZonePacket();
@@ -2087,6 +2165,15 @@ ashita.events.register('key', 'key_cb', function (event)
         satchelModule.HandleKey(event);
     end
     hotbar.HandleKey(event);
+end);
+
+-- Game menus and the party list read DirectInput keyboard state, not the WNDPROC key event.
+ashita.events.register('key_data', 'key_data_cb', function (e)
+    hotbar.HandleKeyData(e);
+end);
+
+ashita.events.register('key_state', 'key_state_cb', function (e)
+    hotbar.HandleKeyState(e);
 end);
 
 -- ============================================
