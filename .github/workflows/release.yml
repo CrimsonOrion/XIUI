@@ -7,6 +7,11 @@ on:
     tags:
       - 'v*'
 
+# The default GITHUB_TOKEN is read-only on forks and new repos; creating a
+# release and uploading or deleting its assets needs write access.
+permissions:
+  contents: write
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
