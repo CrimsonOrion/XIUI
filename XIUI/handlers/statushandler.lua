@@ -6,6 +6,7 @@
 local imgui = require('imgui');
 local encoding = require('libs.encoding');
 local TextureManager = require('libs.texturemanager');
+local trustBuffHandler = require('handlers.trustbuffhandler');
 
 -- Party buffs table, populated by packet 0x076 via ReadPartyBuffsFromPacket()
 local partyBuffs = {};
@@ -147,10 +148,12 @@ statusHandler.clear_zone_cache = function()
 end;
 
 -- return a table of status ids for a party member based on server id.
+-- Players come from packet 0x076; Trusts aren't in that packet, so their effects
+-- come from trustBuffHandler, which rebuilds them from combat messages.
 ---@param server_id number the party memer or target server id to check
 ---@return table status_ids a list of the targets status ids or nil
 statusHandler.get_member_status = function(server_id)
-    return partyBuffs[server_id];
+    return partyBuffs[server_id] or trustBuffHandler.GetBuffs(server_id);
 end
 
 statusHandler.GetBackground = function(isBuff)

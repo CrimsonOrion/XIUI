@@ -24,7 +24,7 @@
 
 addon.name      = 'XIUI';
 addon.author    = 'Team XIUI';
-addon.version   = '1.8.5.1';
+addon.version   = '1.8.5.2';
 addon.desc      = 'Multiple UI elements with manager';
 addon.link      = 'https://github.com/tirem/XIUI'
 
@@ -94,6 +94,7 @@ local configMenu = require('config');
 local commandHelp = require('libs.help');
 local debuffHandler = require('handlers.debuffhandler');
 local petBuffHandler = require('handlers.petbuffhandler');
+local trustBuffHandler = require('handlers.trustbuffhandler');
 local actionTracker = require('handlers.actiontracker');
 local enemyCasts = require('handlers.enemycasts');
 local mobInfo = require('modules.mobinfo.init');
@@ -1945,6 +1946,7 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
             if gConfig.showPartyList then partyList.HandleActionPacket(actionPacket); end
             debuffHandler.HandleActionPacket(actionPacket);
             petBuffHandler.HandleActionPacket(actionPacket);
+            trustBuffHandler.HandleActionPacket(actionPacket);
             actionTracker.HandleActionPacket(actionPacket);
             if gConfig.showNotifications then notifications.HandleActionPacket(actionPacket); end
             if gConfig.showPhantomRoll then phantomRoll.HandleActionPacket(actionPacket); end
@@ -1968,6 +1970,7 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
         partyList.HandleZonePacket(e);
         debuffHandler.HandleZonePacket(e);
         petBuffHandler.HandleZonePacket();
+        trustBuffHandler.HandleZonePacket();
         actionTracker.HandleZonePacket();
         phantomRoll.HandleZonePacket();
         mobInfo.data.HandleZonePacket(e);
@@ -1989,6 +1992,7 @@ ashita.events.register('packet_in', 'packet_in_cb', function (e)
         if messagePacket then
             debuffHandler.HandleMessagePacket(messagePacket);
             petBuffHandler.HandleMessagePacket(messagePacket);
+            trustBuffHandler.HandleMessagePacket(messagePacket);
             if enemyCastTrackingEnabled() then enemyCasts.HandleMessagePacket(messagePacket); end
             blueMagicLearned.HandleMessagePacket(messagePacket);
             if gConfig.hotbarEnabled then
