@@ -16,6 +16,7 @@ function M.createUserSettingsDefaults()
         lockPositions = false,
         globalScale = 1.0,
         hideDuringEvents = true,
+        drawBehindWindows = false,
 
         showPlayerBar = true,
         showTargetBar = true,

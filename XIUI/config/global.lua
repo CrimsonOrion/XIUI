@@ -41,6 +41,9 @@ function M.DrawSettings()
         imgui.ShowHelp('Scales all XIUI elements proportionally. Stacks on top of individual module scale settings. Doesn\'t scale the config window.');
 
         components.DrawCheckbox('Hide During Events', 'hideDuringEvents');
+
+        components.DrawCheckbox('Draw Behind Other Windows', 'drawBehindWindows');
+        imgui.ShowHelp('Draws the XIUI bars and hotbars underneath the windows of other addons (journals, trackers and so on), so those windows show in front of XIUI.');
     end
 
     if components.CollapsingSection('Text Settings##global') then

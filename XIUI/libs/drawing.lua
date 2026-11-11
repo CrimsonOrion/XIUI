@@ -177,9 +177,11 @@ function M.SetOverlayBlocker(key, active)
 end
 
 -- Background list while config or a registered window is open (so those stay on top),
--- foreground otherwise. Note: showConfig is a global from XIUI.lua.
+-- or always when the user wants other addons' windows drawn over XIUI;
+-- foreground otherwise. Note: showConfig and gConfig are globals from XIUI.lua.
 function M.GetUIDrawList()
-    if (showConfig and showConfig[1]) or next(overlayBlockers) ~= nil then
+    if (showConfig and showConfig[1]) or next(overlayBlockers) ~= nil
+        or (gConfig and gConfig.drawBehindWindows) then
         return imgui.GetBackgroundDrawList();
     else
         return imgui.GetForegroundDrawList();
